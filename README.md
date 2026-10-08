@@ -1,38 +1,120 @@
-# FixPass — локальный MVP
+# FixPass — Verifiable Smartphone Service History
 
-FixPass — переносимая сервисная история смартфона: ремонтная мастерская добавляет запись о ремонте, продавец добавляет осмотр, а покупатель проверяет QR-паспорт без кошелька.
+> A QR passport for repaired and refurbished smartphones. Repair shops and resellers add signed service records; buyers can check the record history without connecting a wallet.
 
-## Запуск
+[Hackathon Track](https://superteam.fun/earn/listing/colosseum-crypto-worlds-fair-hackathon-superteam-kazakhstan-track) · [Demo Guide](./DEMO.md) · [Development Plan](./DEVELOPMENT_PLAN.md) · [Pilot Questions](./PILOT.md)
 
-Требуется Node.js 24.15 или новее. Проект использует встроенный `node:sqlite` (в Node 24 его API имеет статус release candidate), отдельные npm-пакеты не устанавливаются. Из папки проекта выполните:
+---
+
+## Built for Colosseum Crypto World's Fair
+
+FixPass is a local MVP for the **Superteam Kazakhstan Track**. It explores a practical consumer use of Solana: making service-history records independently checkable when a used phone changes hands.
+
+## Problem and Solution
+
+### 1. Buyers cannot see a device's service history
+
+- **Problem:** Repair details are scattered across receipts, chats, and shop records. A buyer of a used phone may not know what was repaired or which parts were replaced.
+- **FixPass:** A repair shop creates a QR passport and appends a repair record. A reseller can add an inspection to the same history. A buyer scans the QR code to review the events.
+
+### 2. A record needs a way to detect later edits
+
+- **Problem:** A conventional page can be silently changed by the service hosting it.
+- **FixPass:** Each event is hashed with a random salt and linked to the previous event. The organization's wallet signs a Solana Devnet Memo containing the passport ID, event ID, and hash. The public passport checks the stored record against the on-chain proof.
+
+> An on-chain proof shows that a wallet signed a particular hash and helps detect changes to that record. It does not prove that a shop's description is true, that a repair was done well, or that every event in a device's history has been disclosed.
+
+---
+
+## Why Solana
+
+- **Public verification:** A buyer can check the signed hash against a public Solana transaction.
+- **Low-friction records:** The MVP anchors a record with a Memo transaction instead of requiring a custom program.
+- **Wallet-less buyer flow:** Only organizations connect a wallet; buyers open the QR passport in a browser.
+
+The current prototype uses **Devnet**. It does not issue a token, NFT, or payment, and it does not custody funds.
+
+## Features
+
+- Wallet message sign-in for repair shops and resellers.
+- Separate repair and inspection events with append-only history.
+- Salted SHA-256 records linked to the preceding event.
+- Solana Devnet Memo anchoring, with server-side transaction checks.
+- QR passport that displays the event history and verification status without a buyer wallet.
+- SQLite storage for the local pilot.
+
+## Architecture
+
+```text
+ Repair shop / reseller
+          │
+          ▼
+ ┌────────────────────────┐       ┌─────────────────────┐
+ │ FixPass web app +      │──────▶│ Phantom wallet      │
+ │ local Node.js server   │       │ signs Devnet Memo   │
+ └───────────┬────────────┘       └──────────┬──────────┘
+             │                               │
+             ▼                               ▼
+ ┌────────────────────────┐       ┌─────────────────────┐
+ │ SQLite event history   │       │ Solana Devnet       │
+ │ salted hash chain      │◀──────│ Memo transaction    │
+ └───────────┬────────────┘       └─────────────────────┘
+             │                               ▲
+             └──────────────┬────────────────┘
+                            ▼
+                  ┌──────────────────┐
+                  │ Buyer scans QR   │
+                  │ and checks proof │
+                  └──────────────────┘
+```
+
+Event details stay in the FixPass database. The on-chain Memo contains only a random passport ID, event ID, and salted record hash. The shop or reseller name is self-claimed by the wallet owner; business identity is not independently verified.
+
+## Tech Stack
+
+| Layer | Technology |
+| --- | --- |
+| App server | Node.js 24.15+ built-in HTTP server |
+| Storage | SQLite through `node:sqlite` |
+| Frontend | HTML, CSS, and JavaScript |
+| Wallet | Phantom |
+| Proof | Solana Memo Program on Devnet |
+| Record integrity | SHA-256 with per-event random salt and previous-event hash |
+
+## Quick Start
+
+Prerequisite: **Node.js 24.15 or newer**. No npm packages need to be installed.
 
 ```powershell
+# Start the local server
 node server.mjs
 ```
 
-Откройте `http://127.0.0.1:4173`. Внешние библиотеки не устанавливаются: создание Solana-транзакции загружается из esm.sh по нажатию кнопки, QR-код — из cdnjs.
+Open the local address printed by the server (normally `http://127.0.0.1:4173`). To anchor records, install Phantom, switch it to Solana Devnet, and use test SOL. A buyer can view a passport without a wallet, but the local server must be reachable from the buyer's device.
 
-## Сквозной MVP-сценарий
+See [DEMO.md](./DEMO.md) for the two-organization walkthrough.
 
-1. Организация подключает Phantom и подписывает одноразовое сообщение для входа без комиссии.
-2. Организация создаёт рабочий профиль: ремонтная мастерская или продавец.
-3. Мастерская создаёт паспорт и запись ремонта. Продавец может добавить событие осмотра в существующий паспорт.
-4. Для каждой записи локальный сервер связывает её с организацией и кошельком, добавляет случайную соль и считает SHA-256 с ссылкой на предыдущее событие.
-5. Организация подписывает Memo-транзакцию в Devnet. Сервер сверяет транзакцию, адрес подписанта и хеш перед сохранением подтверждения.
-6. Покупатель открывает QR-паспорт без входа. Страница повторно проверяет хеши, порядок событий и Memo-транзакции через Solana Devnet RPC.
+## Privacy and Current Limits
 
-Memo использует формат `FIXPASS1:<passport-id>:<entry-id>:<sha256>`. В цепочку не попадают детали ремонта, название организации, модель, IMEI или сведения о клиенте. Имя организации заявляет владелец кошелька и оно не подтверждено юридически.
+- Do not enter IMEI or serial numbers, customer names, contact details, addresses, receipts, or identity documents. Real personal data is out of scope for this prototype.
+- The SQLite database is stored locally and is excluded from Git. A public QR page reads event details from the server, so this MVP is not independently hosted or available when that server is offline.
+- Devnet RPC providers can rate-limit or reject requests. The organization needs test SOL to publish a Memo transaction.
+- A wallet signature identifies the signing wallet, not the legal identity of a repair business.
+- The prototype has basic request limits and is not ready for production use or real customer records. It still needs a manual two-wallet demo, privacy review, stronger operational controls, and a hosted HTTPS pilot.
 
-## Границы текущей сборки
+## Roadmap
 
-- Профили, паспорта и события хранятся в локальной SQLite-базе `data/fixpass.sqlite`. База и WAL-файлы исключены из Git; сессии живут в памяти сервера и истекают через четыре часа.
-- Это демонстрационный прототип без резервного копирования, подтверждения юридической личности бизнеса и продвинутой защиты от спама. Есть только базовый лимит запросов. Сервер доступен в локальной сети для сканирования QR; используйте только демонстрационные сведения.
-- Нужны интернет, Phantom, Devnet и тестовый SOL для публикации Memo. Devnet RPC может ограничивать или временно отклонять запросы.
-- Используются внешние подключения: Phantom для входа/подписи, публичный Solana Devnet RPC для транзакций, а CDN для QR-библиотеки, web3.js и шрифтов. В Devnet передаются только публичный кошелёк, случайные ID и хеш; транзакции и их мемо публичны.
-- Подпись доказывает авторство кошелька и целостность опубликованного хеша, но не правдивость записи и не качество ремонта.
-- Хеш-ссылка помогает обнаружить пропуск между опубликованными событиями. Она не доказывает, что организация раскрыла всю историю устройства.
-- Публичная страница получает запись с локального сервера. Для пилота с независимыми устройствами сервер надо развернуть по HTTPS и добавить доступ мастерской.
+- [x] Define the repair-shop → reseller → buyer flow.
+- [x] Build the local MVP with wallet sign-in, SQLite history, QR passports, and Devnet Memo verification.
+- [ ] Complete a manual end-to-end walkthrough using two wallets and a phone.
+- [ ] Validate the workflow with a repair shop and a refurbished-phone reseller.
+- [ ] Review privacy, business verification, rate limits, and hosted deployment before any real-world pilot.
 
-## Дальше по плану
+See the [full development plan](./DEVELOPMENT_PLAN.md) and [pilot interview questions](./PILOT.md).
 
-Смотри [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md): там зафиксированы этапы, принятые решения и оставшиеся ограничения. [DEMO.md](./DEMO.md) содержит сценарий показа, [PILOT.md](./PILOT.md) — вопросы для мастерской и продавца.
+## Project Resources
+
+- [Demo walkthrough](./DEMO.md)
+- [Development plan and status](./DEVELOPMENT_PLAN.md)
+- [Pilot interview guide](./PILOT.md)
+- [Colosseum Crypto World's Fair — Superteam Kazakhstan Track](https://superteam.fun/earn/listing/colosseum-crypto-worlds-fair-hackathon-superteam-kazakhstan-track)
